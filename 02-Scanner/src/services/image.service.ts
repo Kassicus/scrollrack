@@ -1,12 +1,13 @@
 // MTG card name region is approximately at the top of the card
+// Expanded slightly to ensure we capture the full name on all card types
 const NAME_REGION = {
-  x: 0.06,      // 6% from left
-  y: 0.04,      // 4% from top
-  width: 0.88,  // 88% of card width
-  height: 0.10, // 10% of card height
+  x: 0.05,      // 5% from left (slightly wider)
+  y: 0.03,      // 3% from top (start a bit higher)
+  width: 0.90,  // 90% of card width (wider to catch full names)
+  height: 0.12, // 12% of card height (taller to ensure full text capture)
 }
 
-// Detection zone as percentage of video frame
+// Detection zone as percentage of video frame (fallback for manual capture)
 // Card aspect ratio is 2.5:3.5 = 0.714:1
 // For 16:9 video, we size to fit within frame with margins
 const DETECTION_ZONE_PERCENT = {
@@ -18,6 +19,13 @@ export interface ProcessedImage {
   canvas: HTMLCanvasElement
   originalWidth: number
   originalHeight: number
+  // Additional debug stages
+  stageImages?: {
+    original: HTMLCanvasElement
+    cropped: HTMLCanvasElement
+    nameRegion: HTMLCanvasElement
+    enhanced: HTMLCanvasElement
+  }
   debugInfo?: {
     cropRegion: { x: number; y: number; width: number; height: number }
     nameRegion: { x: number; y: number; width: number; height: number }
@@ -27,6 +35,10 @@ export interface ProcessedImage {
 export interface CropOptions {
   cropToDetectionZone?: boolean
   debug?: boolean
+  // If provided, skip cropping - the image is already an extracted card
+  isPreExtracted?: boolean
+  // If true, use full card instead of name region (for debugging)
+  useFullCard?: boolean
 }
 
 class ImageService {
@@ -95,29 +107,67 @@ class ImageService {
     let cardCanvas = sourceCanvas
     let cropRegion = { x: 0, y: 0, width: originalWidth, height: originalHeight }
 
-    if (options.cropToDetectionZone) {
+    // Store original for debug
+    const originalCopy = options.debug ? this.copyCanvas(sourceCanvas) : null
+
+    // If image is pre-extracted (from card tracking), skip the detection zone crop
+    if (!options.isPreExtracted && options.cropToDetectionZone) {
       const result = this.cropToCenteredDetectionZone(sourceCanvas)
       cardCanvas = result.canvas
       cropRegion = result.region
     }
 
-    // Extract the card name region from the card image
-    const nameRegion = this.extractNameRegion(cardCanvas)
+    // Store cropped version for debug
+    const croppedCopy = options.debug ? this.copyCanvas(cardCanvas) : null
+
+    // DEBUG: If useFullCard is true, skip name region extraction
+    let ocrCanvas: HTMLCanvasElement
+    let nameRegionData: { canvas: HTMLCanvasElement; region: { x: number; y: number; width: number; height: number } }
+
+    if (options.useFullCard) {
+      // Full card works better - Tesseract needs more context than just the name region
+      ocrCanvas = cardCanvas
+      nameRegionData = { canvas: cardCanvas, region: cropRegion }
+    } else {
+      // Extract the card name region from the card image
+      nameRegionData = this.extractNameRegion(cardCanvas)
+      ocrCanvas = nameRegionData.canvas
+    }
+
+    // Store name region for debug
+    const nameRegionCopy = options.debug ? this.copyCanvas(nameRegionData.canvas) : null
 
     // Apply image enhancements for better OCR
-    const enhanced = this.enhanceForOCR(nameRegion.canvas)
+    const enhanced = this.enhanceForOCR(ocrCanvas)
 
     const debugInfo = options.debug ? {
       cropRegion,
-      nameRegion: nameRegion.region,
+      nameRegion: nameRegionData.region,
+    } : undefined
+
+    const stageImages = options.debug && originalCopy && croppedCopy && nameRegionCopy ? {
+      original: originalCopy,
+      cropped: croppedCopy,
+      nameRegion: nameRegionCopy,
+      enhanced: this.copyCanvas(enhanced),
     } : undefined
 
     return {
       canvas: enhanced,
       originalWidth,
       originalHeight,
+      stageImages,
       debugInfo,
     }
+  }
+
+  private copyCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
+    const copy = document.createElement('canvas')
+    copy.width = source.width
+    copy.height = source.height
+    const ctx = copy.getContext('2d')!
+    ctx.drawImage(source, 0, 0)
+    return copy
   }
 
   /**
@@ -198,102 +248,11 @@ class ImageService {
   }
 
   /**
-   * Apply image processing to enhance text for OCR
+   * No processing - just return the canvas as-is
+   * Tesseract handles grayscale conversion internally
    */
   private enhanceForOCR(canvas: HTMLCanvasElement): HTMLCanvasElement {
-    const ctx = canvas.getContext('2d')!
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-    const data = imageData.data
-
-    // Step 1: Convert to grayscale
-    for (let i = 0; i < data.length; i += 4) {
-      const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
-      data[i] = gray
-      data[i + 1] = gray
-      data[i + 2] = gray
-    }
-
-    // Step 2: Increase contrast
-    const contrast = 1.4
-    const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255))
-    for (let i = 0; i < data.length; i += 4) {
-      data[i] = this.clamp(factor * (data[i] - 128) + 128)
-      data[i + 1] = this.clamp(factor * (data[i + 1] - 128) + 128)
-      data[i + 2] = this.clamp(factor * (data[i + 2] - 128) + 128)
-    }
-
-    // Step 3: Apply Otsu's thresholding for black/white
-    const threshold = this.calculateOtsuThreshold(data)
-    for (let i = 0; i < data.length; i += 4) {
-      const value = data[i] > threshold ? 255 : 0
-      data[i] = value
-      data[i + 1] = value
-      data[i + 2] = value
-    }
-
-    // Create output canvas with 2x scaling for better OCR
-    const scale = 2
-    const outputCanvas = document.createElement('canvas')
-    outputCanvas.width = canvas.width * scale
-    outputCanvas.height = canvas.height * scale
-    const outputCtx = outputCanvas.getContext('2d')!
-
-    // Put processed data back to source canvas
-    ctx.putImageData(imageData, 0, 0)
-
-    // Scale up with nearest-neighbor for sharp edges
-    outputCtx.imageSmoothingEnabled = false
-    outputCtx.drawImage(canvas, 0, 0, outputCanvas.width, outputCanvas.height)
-
-    return outputCanvas
-  }
-
-  /**
-   * Calculate optimal threshold using Otsu's method
-   */
-  private calculateOtsuThreshold(data: Uint8ClampedArray): number {
-    const histogram = new Array(256).fill(0)
-    const total = data.length / 4
-
-    for (let i = 0; i < data.length; i += 4) {
-      histogram[data[i]]++
-    }
-
-    let sum = 0
-    for (let i = 0; i < 256; i++) {
-      sum += i * histogram[i]
-    }
-
-    let sumB = 0
-    let wB = 0
-    let wF = 0
-    let maxVariance = 0
-    let threshold = 128 // Default fallback
-
-    for (let i = 0; i < 256; i++) {
-      wB += histogram[i]
-      if (wB === 0) continue
-
-      wF = total - wB
-      if (wF === 0) break
-
-      sumB += i * histogram[i]
-
-      const mB = sumB / wB
-      const mF = (sum - sumB) / wF
-      const variance = wB * wF * (mB - mF) * (mB - mF)
-
-      if (variance > maxVariance) {
-        maxVariance = variance
-        threshold = i
-      }
-    }
-
-    return threshold
-  }
-
-  private clamp(value: number): number {
-    return Math.max(0, Math.min(255, Math.round(value)))
+    return canvas
   }
 
   /**

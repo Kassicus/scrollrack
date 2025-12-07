@@ -1,52 +1,76 @@
-import Tesseract, { createWorker, type Worker } from 'tesseract.js'
+import Tesseract, { Worker } from 'tesseract.js'
 
 class OCRService {
   private worker: Worker | null = null
-  private isInitializing = false
+  private isInitialized = false
   private initPromise: Promise<void> | null = null
 
   async initialize(): Promise<void> {
-    if (this.worker) return
-    if (this.initPromise) return this.initPromise
+    // Prevent multiple simultaneous initializations
+    if (this.initPromise) {
+      return this.initPromise
+    }
 
-    this.isInitializing = true
-    this.initPromise = this.createWorker()
-    await this.initPromise
-    this.isInitializing = false
+    if (this.isInitialized && this.worker) {
+      return
+    }
+
+    this.initPromise = this.doInitialize()
+    return this.initPromise
   }
 
-  private async createWorker(): Promise<void> {
-    this.worker = await createWorker('eng', Tesseract.OEM.LSTM_ONLY, {
-      logger: (m) => {
-        if (m.status === 'recognizing text') {
-          console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`)
-        }
-      },
-    })
+  private async doInitialize(): Promise<void> {
+    console.log('OCR: Creating worker...')
+    const startTime = performance.now()
 
-    // Configure for card name recognition (single line, alphanumeric with some punctuation)
-    await this.worker.setParameters({
-      tessedit_char_whitelist:
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-',. /",
-      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
-    })
+    try {
+      this.worker = await Tesseract.createWorker('eng', undefined, {
+        logger: (m) => {
+          if (m.status === 'loading language traineddata') {
+            console.log('OCR: Loading language data...')
+          }
+        },
+      })
+
+      const elapsed = performance.now() - startTime
+      console.log(`OCR: Worker ready in ${elapsed.toFixed(0)}ms`)
+      this.isInitialized = true
+    } catch (error) {
+      console.error('OCR: Failed to create worker:', error)
+      this.initPromise = null
+      throw error
+    }
   }
 
   async recognizeText(imageSource: string | HTMLCanvasElement): Promise<OCRResult> {
-    await this.initialize()
+    // Ensure worker is initialized
+    if (!this.worker) {
+      await this.initialize()
+    }
 
     if (!this.worker) {
-      throw new Error('OCR worker not initialized')
+      throw new Error('OCR worker not available')
     }
 
     const startTime = performance.now()
 
-    try {
-      const result = await this.worker.recognize(imageSource)
-      const endTime = performance.now()
+    // Convert canvas to PNG data URL - known working format for Tesseract
+    let imageData: string
+    if (imageSource instanceof HTMLCanvasElement) {
+      imageData = imageSource.toDataURL('image/png')
+      console.log('OCR input:', imageSource.width, 'x', imageSource.height)
+    } else {
+      imageData = imageSource
+    }
 
+    try {
+      const result = await this.worker.recognize(imageData)
+
+      const endTime = performance.now()
       const text = result.data.text.trim()
       const confidence = result.data.confidence
+
+      console.log('OCR result:', { text: text.substring(0, 50) + (text.length > 50 ? '...' : ''), confidence, time: `${(endTime - startTime).toFixed(0)}ms` })
 
       return {
         text,
@@ -63,12 +87,14 @@ class OCRService {
     if (this.worker) {
       await this.worker.terminate()
       this.worker = null
-      this.initPromise = null
     }
+    this.isInitialized = false
+    this.initPromise = null
+    console.log('OCR service terminated')
   }
 
   isReady(): boolean {
-    return this.worker !== null && !this.isInitializing
+    return this.isInitialized && this.worker !== null
   }
 }
 

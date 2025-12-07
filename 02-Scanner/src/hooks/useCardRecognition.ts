@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { ocrService, type OCRResult } from '@/services/ocr.service'
-import { imageService } from '@/services/image.service'
+import { imageService, type ProcessedImage } from '@/services/image.service'
 import { scryfallService, type CardLookupResult } from '@/services/scryfall.service'
 import { extractCardName, isValidCardName } from '@/utils/textNormalization'
 import { correctOCRErrors } from '@/utils/fuzzyMatch'
@@ -14,6 +14,13 @@ export type RecognitionStatus =
   | 'success'
   | 'error'
 
+export interface RecognitionOptions {
+  // If true, the image is already an extracted card (from card tracking)
+  isPreExtracted?: boolean
+  // If true, include debug images in the result
+  debug?: boolean
+}
+
 export interface RecognitionResult {
   card: ScryfallCard | null
   ocrText: string
@@ -22,6 +29,8 @@ export interface RecognitionResult {
   suggestions: string[]
   processingTime: number
   error: string | null
+  // Debug info
+  processedImage?: ProcessedImage
 }
 
 export function useCardRecognition() {
@@ -31,6 +40,8 @@ export function useCardRecognition() {
   const processingRef = useRef(false)
 
   // Initialize OCR worker on mount
+  // Note: We don't terminate on unmount because ocrService is a singleton
+  // that should persist across component re-mounts (e.g., view switches)
   useEffect(() => {
     const init = async () => {
       setStatus('initializing')
@@ -44,14 +55,15 @@ export function useCardRecognition() {
       }
     }
     init()
-
-    return () => {
-      ocrService.terminate()
-    }
   }, [])
 
   const recognizeCard = useCallback(
-    async (imageSource: string | HTMLCanvasElement | HTMLVideoElement): Promise<RecognitionResult> => {
+    async (
+      imageSource: string | HTMLCanvasElement | HTMLVideoElement,
+      options: RecognitionOptions = {}
+    ): Promise<RecognitionResult> => {
+      const { isPreExtracted = false, debug = false } = options
+
       if (processingRef.current) {
         return {
           card: null,
@@ -69,9 +81,15 @@ export function useCardRecognition() {
       const startTime = performance.now()
 
       try {
-        // Step 1: Process image for OCR (crops to detection zone and extracts name region)
+        // Step 1: Process image for OCR
+        // If pre-extracted (from card tracking), skip detection zone cropping
         console.log('Processing image for OCR...')
-        const processedImage = await imageService.processForOCR(imageSource)
+        const processedImage = await imageService.processForOCR(imageSource, {
+          cropToDetectionZone: !isPreExtracted,
+          isPreExtracted,
+          debug,
+          useFullCard: true, // Full card works better than name region for Tesseract
+        })
         console.log('Processed image size:', processedImage.canvas.width, 'x', processedImage.canvas.height)
 
         // Step 2: Run OCR on processed image
@@ -95,6 +113,7 @@ export function useCardRecognition() {
             suggestions: [],
             processingTime: performance.now() - startTime,
             error: 'Could not extract valid card name from image',
+            processedImage: debug ? processedImage : undefined,
           }
           setResult(result)
           setStatus('error')
@@ -113,6 +132,7 @@ export function useCardRecognition() {
           suggestions: lookupResult.suggestions || [],
           processingTime: performance.now() - startTime,
           error: lookupResult.success ? null : lookupResult.error || 'Card not found',
+          processedImage: debug ? processedImage : undefined,
         }
 
         setResult(recognitionResult)
