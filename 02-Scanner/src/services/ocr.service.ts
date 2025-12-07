@@ -1,4 +1,4 @@
-import Tesseract, { Worker } from 'tesseract.js'
+import Tesseract, { type Worker } from 'tesseract.js'
 
 class OCRService {
   private worker: Worker | null = null

@@ -3,6 +3,7 @@ import { StatusBar } from '@/components/layout/StatusBar'
 import { ScanView } from '@/components/scan/ScanView'
 import { CollectionView } from '@/components/collection/CollectionView'
 import { SettingsView } from '@/components/settings/SettingsView'
+import { ToastContainer } from '@/components/ui/toast'
 import { useAppStore } from '@/store/appStore'
 import { useCollection } from '@/hooks/useCollection'
 
@@ -19,6 +20,7 @@ function App() {
         {currentView === 'settings' && <SettingsView />}
       </main>
       <StatusBar />
+      <ToastContainer />
     </div>
   )
 }

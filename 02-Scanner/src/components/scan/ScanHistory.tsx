@@ -1,71 +1,133 @@
 import { useScanStore } from '@/store/scanStore'
-import { Trash2 } from 'lucide-react'
+import { Trash2, History, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export function ScanHistory() {
   const { scanHistory, clearHistory } = useScanStore()
 
-  if (scanHistory.length === 0) {
-    return (
-      <div className="bg-card border border-border rounded-lg p-4 flex-1">
-        <h2 className="text-lg font-semibold mb-4">Scan History</h2>
-        <div className="text-muted-foreground text-center py-8">
-          Scanned cards will appear here.
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="bg-card border border-border rounded-lg p-4 flex-1 flex flex-col">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold">Scan History</h2>
-        <Button
-          onClick={clearHistory}
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground hover:text-destructive"
-        >
-          <Trash2 className="w-4 h-4" />
-        </Button>
+    <div className="bg-card border border-border rounded-lg flex-1 flex flex-col min-h-0 h-full">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-border">
+        <div className="flex items-center gap-2">
+          <History className="w-5 h-5 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">Scan History</h2>
+          {scanHistory.length > 0 && (
+            <span className="text-xs bg-secondary px-2 py-0.5 rounded-full text-muted-foreground">
+              {scanHistory.length}
+            </span>
+          )}
+        </div>
+        {scanHistory.length > 0 && (
+          <Button
+            onClick={clearHistory}
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground hover:text-destructive"
+            title="Clear history"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        )}
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-2">
-        {scanHistory.map((item) => {
-          const imageUrl =
-            item.card.image_uris?.small ||
-            item.card.card_faces?.[0]?.image_uris?.small
+      {/* Content */}
+      {scanHistory.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center p-4">
+          <div className="text-center">
+            <History className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+            <p className="text-muted-foreground text-sm">No cards scanned yet</p>
+            <p className="text-muted-foreground/60 text-xs mt-1">
+              Scanned cards will appear here
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <div className="divide-y divide-border">
+            {scanHistory.map((item) => {
+              const imageUrl =
+                item.card.image_uris?.small ||
+                item.card.card_faces?.[0]?.image_uris?.small
+              const price = item.isFoil
+                ? item.card.prices.usd_foil
+                : item.card.prices.usd
 
-          return (
-            <div
-              key={item.id}
-              className="flex items-center gap-3 p-2 rounded-md hover:bg-secondary/50 transition-colors"
-            >
-              {imageUrl && (
-                <img
-                  src={imageUrl}
-                  alt={item.card.name}
-                  className="w-10 h-14 rounded object-cover"
-                />
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm truncate">{item.card.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {item.card.set.toUpperCase()} · {item.quantity}x
-                  {item.isFoil && ' (Foil)'}
-                </p>
-              </div>
-              <span className="text-xs text-muted-foreground">
-                {formatTime(item.timestamp)}
-              </span>
-            </div>
-          )
-        })}
-      </div>
+              return (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-3 p-3 hover:bg-secondary/30 transition-colors"
+                >
+                  {imageUrl ? (
+                    <img
+                      src={imageUrl}
+                      alt={item.card.name}
+                      className="w-12 h-[67px] rounded object-cover flex-shrink-0"
+                    />
+                  ) : (
+                    <div className="w-12 h-[67px] bg-secondary rounded flex items-center justify-center flex-shrink-0">
+                      <span className="text-xs text-muted-foreground">?</span>
+                    </div>
+                  )}
+
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate flex items-center gap-1">
+                      {item.card.name}
+                      {item.isFoil && (
+                        <Sparkles className="w-3 h-3 text-amber-500 flex-shrink-0" />
+                      )}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {item.card.set_name}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs bg-secondary px-1.5 py-0.5 rounded">
+                        x{item.quantity}
+                      </span>
+                      {price && (
+                        <span className="text-xs text-success">${price}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="text-right flex-shrink-0">
+                    <span className="text-xs text-muted-foreground">
+                      {formatTime(item.timestamp)}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Footer with session stats */}
+      {scanHistory.length > 0 && (
+        <div className="p-3 border-t border-border bg-secondary/20">
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>
+              Session: {scanHistory.reduce((sum, item) => sum + item.quantity, 0)} cards
+            </span>
+            <span className="text-success">
+              ${scanHistory
+                .reduce((sum, item) => {
+                  const price = item.isFoil
+                    ? parseFloat(item.card.prices.usd_foil || '0')
+                    : parseFloat(item.card.prices.usd || '0')
+                  return sum + price * item.quantity
+                }, 0)
+                .toFixed(2)}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 function formatTime(date: Date): string {
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  // Handle both Date objects and date strings
+  const d = date instanceof Date ? date : new Date(date)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }

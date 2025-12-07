@@ -36,7 +36,7 @@ export function CameraFeed({ onRecognitionComplete }: CameraFeedProps) {
   } = useCamera()
 
   const { status, recognizeCard, isInitialized, result, reset: resetRecognition } = useCardRecognition()
-  const { autoCapture, setAutoCapture, setCurrentResult } = useScanStore()
+  const { autoCapture, setAutoCapture, setCurrentResult, cameraRotation, postScanDelay } = useScanStore()
   const { playSuccess, playError, playCapture, playStable } = useAudioFeedback()
 
   const isProcessing = status === 'processing'
@@ -122,16 +122,16 @@ export function CameraFeed({ onRecognitionComplete }: CameraFeedProps) {
     }
   }, [autoCapture, isInitialized, isProcessing, startTracking, stopTracking])
 
-  // Reset tracking after recognition - quick reset to allow rapid scanning
+  // Reset tracking after recognition - uses configurable post-scan delay
   useEffect(() => {
     if (status === 'success' || status === 'error') {
       const timeout = setTimeout(() => {
         resetTracking()
         resetRecognition()
-      }, 500) // Quick reset for continuous scanning
+      }, postScanDelay)
       return () => clearTimeout(timeout)
     }
-  }, [status, resetTracking, resetRecognition])
+  }, [status, resetTracking, resetRecognition, postScanDelay])
 
   // Manual capture handler
   const handleManualCapture = useCallback(async () => {
@@ -252,7 +252,7 @@ export function CameraFeed({ onRecognitionComplete }: CameraFeedProps) {
               width: { ideal: 1280 },
               height: { ideal: 720 },
             }}
-            className="w-full h-full object-cover"
+            className={cn('w-full h-full object-cover', cameraRotation && 'rotate-180')}
           />
 
           {/* Card detection overlay */}

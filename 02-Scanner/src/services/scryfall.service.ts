@@ -3,21 +3,71 @@ import type { ScryfallCard, ScryfallAutocomplete, ScryfallError } from '@/types/
 
 const API_BASE = 'https://api.scryfall.com'
 const MIN_REQUEST_DELAY = 100 // 10 requests per second max
+const CACHE_DB_NAME = 'mtg-scanner-cache'
+const CACHE_STORE_NAME = 'scryfall-cards'
+const CACHE_VERSION = 1
+const CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours - card data rarely changes
+
+interface CachedCard {
+  key: string
+  data: ScryfallCard
+  timestamp: number
+}
 
 class ScryfallService {
   private requestQueue: Array<() => Promise<void>> = []
   private isProcessing = false
   private lastRequestTime = 0
-  private cache = new Map<string, { data: ScryfallCard; timestamp: number }>()
-  private cacheTimeout = 5 * 60 * 1000 // 5 minutes
+  // In-memory cache for fast access during session
+  private memoryCache = new Map<string, { data: ScryfallCard; timestamp: number }>()
+  private db: IDBDatabase | null = null
+  private dbReady: Promise<void>
+
+  constructor() {
+    this.dbReady = this.initDB()
+  }
+
+  private initDB(): Promise<void> {
+    return new Promise((resolve) => {
+      try {
+        const request = indexedDB.open(CACHE_DB_NAME, CACHE_VERSION)
+
+        request.onerror = () => {
+          console.warn('Scryfall cache DB failed to open, using memory-only cache')
+          resolve()
+        }
+
+        request.onsuccess = () => {
+          this.db = request.result
+          resolve()
+        }
+
+        request.onupgradeneeded = (event) => {
+          const db = (event.target as IDBOpenDBRequest).result
+          if (!db.objectStoreNames.contains(CACHE_STORE_NAME)) {
+            db.createObjectStore(CACHE_STORE_NAME, { keyPath: 'key' })
+          }
+        }
+      } catch {
+        console.warn('IndexedDB not available, using memory-only cache')
+        resolve()
+      }
+    })
+  }
 
   /**
    * Search for a card by exact name
    */
   async getCardByExactName(name: string): Promise<ScryfallCard | null> {
     const cacheKey = `exact:${name.toLowerCase()}`
-    const cached = this.getFromCache(cacheKey)
-    if (cached) return cached
+
+    // Check memory cache first
+    const memoryCached = this.getFromCache(cacheKey)
+    if (memoryCached) return memoryCached
+
+    // Check persistent cache
+    const persistentCached = await this.getFromPersistentCache(cacheKey)
+    if (persistentCached) return persistentCached
 
     try {
       const response = await this.makeRequest<ScryfallCard>(
@@ -38,8 +88,14 @@ class ScryfallService {
    */
   async getCardByFuzzyName(name: string): Promise<ScryfallCard | null> {
     const cacheKey = `fuzzy:${name.toLowerCase()}`
-    const cached = this.getFromCache(cacheKey)
-    if (cached) return cached
+
+    // Check memory cache first
+    const memoryCached = this.getFromCache(cacheKey)
+    if (memoryCached) return memoryCached
+
+    // Check persistent cache
+    const persistentCached = await this.getFromPersistentCache(cacheKey)
+    if (persistentCached) return persistentCached
 
     try {
       const response = await this.makeRequest<ScryfallCard>(
@@ -93,8 +149,14 @@ class ScryfallService {
    */
   async getCardById(id: string): Promise<ScryfallCard | null> {
     const cacheKey = `id:${id}`
-    const cached = this.getFromCache(cacheKey)
-    if (cached) return cached
+
+    // Check memory cache first
+    const memoryCached = this.getFromCache(cacheKey)
+    if (memoryCached) return memoryCached
+
+    // Check persistent cache
+    const persistentCached = await this.getFromPersistentCache(cacheKey)
+    if (persistentCached) return persistentCached
 
     try {
       const response = await this.makeRequest<ScryfallCard>(`/cards/${id}`)
@@ -240,18 +302,64 @@ class ScryfallService {
   }
 
   private getFromCache(key: string): ScryfallCard | null {
-    const cached = this.cache.get(key)
-    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+    // Check memory cache first (fast path)
+    const cached = this.memoryCache.get(key)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
       return cached.data
     }
     if (cached) {
-      this.cache.delete(key)
+      this.memoryCache.delete(key)
     }
     return null
   }
 
+  private async getFromPersistentCache(key: string): Promise<ScryfallCard | null> {
+    await this.dbReady
+    if (!this.db) return null
+
+    return new Promise((resolve) => {
+      try {
+        const transaction = this.db!.transaction(CACHE_STORE_NAME, 'readonly')
+        const store = transaction.objectStore(CACHE_STORE_NAME)
+        const request = store.get(key)
+
+        request.onsuccess = () => {
+          const cached = request.result as CachedCard | undefined
+          if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+            // Also populate memory cache
+            this.memoryCache.set(key, { data: cached.data, timestamp: cached.timestamp })
+            resolve(cached.data)
+          } else {
+            resolve(null)
+          }
+        }
+
+        request.onerror = () => resolve(null)
+      } catch {
+        resolve(null)
+      }
+    })
+  }
+
   private setCache(key: string, data: ScryfallCard): void {
-    this.cache.set(key, { data, timestamp: Date.now() })
+    const timestamp = Date.now()
+    // Set in memory cache
+    this.memoryCache.set(key, { data, timestamp })
+    // Persist to IndexedDB (fire and forget)
+    this.persistToCache(key, data, timestamp)
+  }
+
+  private async persistToCache(key: string, data: ScryfallCard, timestamp: number): Promise<void> {
+    await this.dbReady
+    if (!this.db) return
+
+    try {
+      const transaction = this.db.transaction(CACHE_STORE_NAME, 'readwrite')
+      const store = transaction.objectStore(CACHE_STORE_NAME)
+      store.put({ key, data, timestamp } as CachedCard)
+    } catch {
+      // Ignore persistence errors
+    }
   }
 
   private sleep(ms: number): Promise<void> {
@@ -259,7 +367,17 @@ class ScryfallService {
   }
 
   clearCache(): void {
-    this.cache.clear()
+    this.memoryCache.clear()
+    // Also clear IndexedDB cache
+    if (this.db) {
+      try {
+        const transaction = this.db.transaction(CACHE_STORE_NAME, 'readwrite')
+        const store = transaction.objectStore(CACHE_STORE_NAME)
+        store.clear()
+      } catch {
+        // Ignore
+      }
+    }
   }
 }
 
