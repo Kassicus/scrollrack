@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { ScryfallCard } from '@/types/scryfall.types'
 import type { RecognitionResult } from '@/hooks/useCardRecognition'
 
-interface ScanHistoryItem {
+export interface ScanHistoryItem {
   id: string
   card: ScryfallCard
   timestamp: Date
@@ -33,6 +33,7 @@ interface ScanState {
   // Scan history (session-based)
   scanHistory: ScanHistoryItem[]
   addToHistory: (card: ScryfallCard, quantity: number, isFoil: boolean) => void
+  removeFromHistory: (id: string) => ScanHistoryItem | undefined
   clearHistory: () => void
 
   // Pending card (awaiting confirmation)
@@ -77,6 +78,16 @@ export const useScanStore = create<ScanState>()(
             ...state.scanHistory,
           ].slice(0, 50), // Keep last 50 items
         })),
+      removeFromHistory: (id) => {
+        let removedItem: ScanHistoryItem | undefined
+        set((state) => {
+          removedItem = state.scanHistory.find((item) => item.id === id)
+          return {
+            scanHistory: state.scanHistory.filter((item) => item.id !== id),
+          }
+        })
+        return removedItem
+      },
       clearHistory: () => set({ scanHistory: [] }),
 
       pendingCard: null,

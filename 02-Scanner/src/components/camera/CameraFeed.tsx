@@ -36,7 +36,7 @@ export function CameraFeed({ onRecognitionComplete }: CameraFeedProps) {
   } = useCamera()
 
   const { status, recognizeCard, isInitialized, result, reset: resetRecognition } = useCardRecognition()
-  const { autoCapture, setAutoCapture, setCurrentResult, cameraRotation, postScanDelay } = useScanStore()
+  const { autoCapture, setAutoCapture, setCurrentResult, cameraRotation, postScanDelay, addToHistory } = useScanStore()
   const { playSuccess, playError, playCapture, playStable } = useAudioFeedback()
 
   const isProcessing = status === 'processing'
@@ -66,8 +66,9 @@ export function CameraFeed({ onRecognitionComplete }: CameraFeedProps) {
 
     if (recognitionResult.card) {
       playSuccess()
-      // Auto-add card to database
+      // Auto-add card to database and scan history
       await databaseService.addCard(recognitionResult.card, 1, false)
+      addToHistory(recognitionResult.card, 1, false)
       setLastAddedCard(recognitionResult.card.name)
       console.log('Added to collection:', recognitionResult.card.name)
       // Clear the "added" message after 2 seconds
@@ -77,7 +78,7 @@ export function CameraFeed({ onRecognitionComplete }: CameraFeedProps) {
     }
 
     onRecognitionComplete?.()
-  }, [recognizeCard, setCurrentResult, onRecognitionComplete, playCapture, playSuccess, playError, showDebug])
+  }, [recognizeCard, setCurrentResult, onRecognitionComplete, playCapture, playSuccess, playError, showDebug, addToHistory])
 
   // Card tracking with auto-capture
   const {

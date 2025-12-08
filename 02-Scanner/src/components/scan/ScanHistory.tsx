@@ -1,9 +1,26 @@
 import { useScanStore } from '@/store/scanStore'
-import { Trash2, History, Sparkles } from 'lucide-react'
+import { databaseService } from '@/services/database.service'
+import { Trash2, History, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export function ScanHistory() {
-  const { scanHistory, clearHistory } = useScanStore()
+  const { scanHistory, clearHistory, removeFromHistory } = useScanStore()
+
+  const handleRemoveItem = async (id: string) => {
+    const removed = removeFromHistory(id)
+    if (removed) {
+      // Also remove from database
+      await databaseService.decrementCard(removed.card.id, removed.quantity, removed.isFoil)
+    }
+  }
+
+  const handleClearAll = async () => {
+    // Remove all items from database
+    for (const item of scanHistory) {
+      await databaseService.decrementCard(item.card.id, item.quantity, item.isFoil)
+    }
+    clearHistory()
+  }
 
   return (
     <div className="bg-card border border-border rounded-lg flex-1 flex flex-col min-h-0 h-full">
@@ -20,11 +37,11 @@ export function ScanHistory() {
         </div>
         {scanHistory.length > 0 && (
           <Button
-            onClick={clearHistory}
+            onClick={handleClearAll}
             variant="ghost"
             size="sm"
             className="text-muted-foreground hover:text-destructive"
-            title="Clear history"
+            title="Clear history and remove from collection"
           >
             <Trash2 className="w-4 h-4" />
           </Button>
@@ -90,10 +107,17 @@ export function ScanHistory() {
                     </div>
                   </div>
 
-                  <div className="text-right flex-shrink-0">
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     <span className="text-xs text-muted-foreground">
                       {formatTime(item.timestamp)}
                     </span>
+                    <button
+                      onClick={() => handleRemoveItem(item.id)}
+                      className="p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                      title="Remove from history and collection"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
                   </div>
                 </div>
               )
