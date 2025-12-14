@@ -23,12 +23,15 @@ interface ScanState {
   setSoundEnabled: (enabled: boolean) => void
   selectedCameraId: string
   setSelectedCameraId: (id: string) => void
-  resolution: '720p' | '1080p'
-  setResolution: (res: '720p' | '1080p') => void
+  resolution: '480p' | '720p' | '1080p'
+  setResolution: (res: '480p' | '720p' | '1080p') => void
   cameraRotation: boolean
   setCameraRotation: (rotated: boolean) => void
   postScanDelay: number
   setPostScanDelay: (delay: number) => void
+  // Performance mode for low-power devices like Raspberry Pi
+  performanceMode: boolean
+  setPerformanceMode: (enabled: boolean) => void
 
   // Scan history (session-based)
   scanHistory: ScanHistoryItem[]
@@ -63,6 +66,8 @@ export const useScanStore = create<ScanState>()(
       setCameraRotation: (rotated) => set({ cameraRotation: rotated }),
       postScanDelay: 500,
       setPostScanDelay: (delay) => set({ postScanDelay: delay }),
+      performanceMode: false,
+      setPerformanceMode: (enabled) => set({ performanceMode: enabled }),
 
       scanHistory: [],
       addToHistory: (card, quantity, isFoil) =>
@@ -105,6 +110,7 @@ export const useScanStore = create<ScanState>()(
         resolution: state.resolution,
         cameraRotation: state.cameraRotation,
         postScanDelay: state.postScanDelay,
+        performanceMode: state.performanceMode,
       }),
     }
   )

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useScanStore } from '@/store/scanStore'
 
 export interface CameraDevice {
   deviceId: string
@@ -7,9 +8,12 @@ export interface CameraDevice {
 
 export function useCamera() {
   const [devices, setDevices] = useState<CameraDevice[]>([])
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('')
   const [hasPermission, setHasPermission] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Use Zustand store for camera selection (synced with settings page)
+  const selectedDeviceId = useScanStore((state) => state.selectedCameraId)
+  const setSelectedDeviceId = useScanStore((state) => state.setSelectedCameraId)
 
   const enumerateDevices = useCallback(async () => {
     try {
@@ -23,14 +27,25 @@ export function useCamera() {
 
       setDevices(videoDevices)
 
+      // Only auto-select first camera if no camera is persisted in store
+      // AND there are available cameras
       if (videoDevices.length > 0 && !selectedDeviceId) {
         setSelectedDeviceId(videoDevices[0].deviceId)
+      }
+
+      // If persisted camera no longer exists, fall back to first available
+      if (selectedDeviceId && videoDevices.length > 0) {
+        const exists = videoDevices.some(d => d.deviceId === selectedDeviceId)
+        if (!exists) {
+          console.warn('Saved camera not found, falling back to first available')
+          setSelectedDeviceId(videoDevices[0].deviceId)
+        }
       }
     } catch (err) {
       setError('Failed to enumerate camera devices')
       console.error('Error enumerating devices:', err)
     }
-  }, [selectedDeviceId])
+  }, [selectedDeviceId, setSelectedDeviceId])
 
   const requestPermission = useCallback(async () => {
     try {

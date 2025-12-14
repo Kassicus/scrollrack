@@ -36,7 +36,7 @@ export function CameraFeed({ onRecognitionComplete }: CameraFeedProps) {
   } = useCamera()
 
   const { status, recognizeCard, isInitialized, result, reset: resetRecognition } = useCardRecognition()
-  const { autoCapture, setAutoCapture, setCurrentResult, cameraRotation, postScanDelay, addToHistory } = useScanStore()
+  const { autoCapture, setAutoCapture, setCurrentResult, cameraRotation, postScanDelay, addToHistory, performanceMode, resolution } = useScanStore()
   const { playSuccess, playError, playCapture, playStable } = useAudioFeedback()
 
   const isProcessing = status === 'processing'
@@ -93,6 +93,7 @@ export function CameraFeed({ onRecognitionComplete }: CameraFeedProps) {
   } = useCardTracking({
     enabled: autoCapture && isInitialized && !isProcessing,
     debug: showDebug,
+    performanceMode,
     onStable: (_card, extracted) => {
       playStable()
       processCapture(extracted)
@@ -247,11 +248,11 @@ export function CameraFeed({ onRecognitionComplete }: CameraFeedProps) {
             ref={webcamRef}
             audio={false}
             screenshotFormat="image/jpeg"
-            screenshotQuality={0.92}
+            screenshotQuality={performanceMode ? 0.85 : 0.92}
             videoConstraints={{
               deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
+              width: { ideal: resolution === '1080p' ? 1920 : resolution === '720p' ? 1280 : 854 },
+              height: { ideal: resolution === '1080p' ? 1080 : resolution === '720p' ? 720 : 480 },
             }}
             className={cn('w-full h-full object-cover', cameraRotation && 'rotate-180')}
           />

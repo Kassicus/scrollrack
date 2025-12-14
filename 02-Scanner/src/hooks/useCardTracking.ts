@@ -3,7 +3,8 @@ import { cardDetectionService, type DetectedCard } from '@/services/cardDetectio
 
 // Simple timing - detect card in zone, wait briefly, capture
 const CAPTURE_DELAY = 300 // ms to wait after detecting card
-const SAMPLE_INTERVAL = 100 // ms between frame samples
+const SAMPLE_INTERVAL_NORMAL = 100 // ms between frame samples (normal mode)
+const SAMPLE_INTERVAL_PERFORMANCE = 250 // ms between frame samples (performance mode for Pi)
 const COOLDOWN_AFTER_CAPTURE = 1500 // ms to wait after capture before scanning again
 
 export type TrackingState = 'no-card' | 'tracking' | 'stabilizing' | 'stable' | 'cooldown'
@@ -20,10 +21,13 @@ interface UseCardTrackingOptions {
   onCardLost?: () => void
   enabled?: boolean
   debug?: boolean
+  performanceMode?: boolean
 }
 
 export function useCardTracking(options: UseCardTrackingOptions = {}) {
-  const { onStable, onCardLost, enabled = true, debug = false } = options
+  const { onStable, onCardLost, enabled = true, debug = false, performanceMode = false } = options
+
+  const sampleInterval = performanceMode ? SAMPLE_INTERVAL_PERFORMANCE : SAMPLE_INTERVAL_NORMAL
 
   const [trackingState, setTrackingState] = useState<TrackingState>('no-card')
   const [detectedCard, setDetectedCard] = useState<DetectedCard | null>(null)
@@ -174,8 +178,8 @@ export function useCardTracking(options: UseCardTrackingOptions = {}) {
     hasTriggeredRef.current = false
     noCardCountRef.current = 0
 
-    intervalRef.current = window.setInterval(processFrame, SAMPLE_INTERVAL)
-  }, [processFrame])
+    intervalRef.current = window.setInterval(processFrame, sampleInterval)
+  }, [processFrame, sampleInterval])
 
   const stopTracking = useCallback(() => {
     if (intervalRef.current) {
